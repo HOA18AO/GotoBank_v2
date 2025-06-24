@@ -1,0 +1,77 @@
+# version: '3.8'
+
+services:
+  selenium-hub:
+    image: selenium/hub:4.10.0
+    platform: linux/amd64
+    container_name: selenium-hub-webhook
+    ports:
+      - "4444:4444"
+    environment:
+      - GRID_BROWSER_TIMEOUT=60000
+      - SE_NODE_MAX_SESSIONS=10
+      - TZ=${TZ}  # ← Use from .env
+    networks:
+      - mb-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  edge:
+    image: selenium/node-edge:4.10.0
+    platform: linux/amd64
+    container_name: edge-node-webhook
+    shm_size: 2g
+    depends_on:
+      - selenium-hub
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=4
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+      - SE_NODE_SESSION_TIMEOUT=60
+      - TZ=${TZ}  # ← Use from .env
+    networks:
+      - mb-network
+    restart: unless-stopped
+
+  mb-fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mb-fastapi-webhook
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      selenium-hub:
+        condition: service_healthy
+    env_file:
+      - .env  # ← Load ALL variables from .env file
+    environment:
+      - SELENIUM_HOST=selenium-hub
+      - SELENIUM_PORT=4444
+      - HOST_OS=mac
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - DOCKER_DEFAULT_PLATFORM=linux/amd64
+      - IS_DOCKER=true
+    networks:
+      - mb-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  mb-network:
+    driver: bridge
